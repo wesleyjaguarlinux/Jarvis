@@ -6,6 +6,8 @@ from modules.personal.habits_cli import list_pending_habits, complete_habit
 from modules.personal.notes_cli import add_note, list_notes
 from modules.personal.inbox_watcher import process_inbox
 from modules.personal.search_cli import search_database
+from modules.personal.web_fetcher import fetch_and_save_url
+from modules.personal.exporter_cli import export_to_markdown
 
 def main():
     parser = argparse.ArgumentParser(description="Jarvis Life OS - O seu Segundo Cerebro")
@@ -25,6 +27,12 @@ def main():
 
     search_parser = subparsers.add_parser("search", help="Busca inteligente no banco de dados")
     search_parser.add_argument("term", type=str, help="Termo a ser buscado")
+
+    fetch_parser = subparsers.add_parser("fetch", help="Captura conteudo de uma URL e salva nas notas")
+    fetch_parser.add_argument("url", type=str, help="Link da pagina web")
+    fetch_parser.add_argument("--tag", type=str, default="web", help="Tag opcional (padrao: web)")
+
+    subparsers.add_parser("export", help="Exporta o relatorio completo do sistema para Markdown")
 
     args = parser.parse_args()
 
@@ -49,6 +57,10 @@ def main():
         process_inbox()
     elif args.command == "search":
         search_database(args.term)
+    elif args.command == "fetch":
+        fetch_and_save_url(args.url, args.tag)
+    elif args.command == "export":
+        export_to_markdown()
     else:
         print("🧠 [Jarvis Life OS] Bem-vindo ao nucleo do sistema.")
         print("Use 'python main.py -h' para ver os comandos disponiveis.")
