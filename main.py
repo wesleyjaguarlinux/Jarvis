@@ -5,6 +5,7 @@ from modules.personal.reporter import generate_report
 from modules.personal.habits_cli import list_pending_habits, complete_habit
 from modules.personal.notes_cli import add_note, list_notes
 from modules.personal.inbox_watcher import process_inbox
+from modules.personal.search_cli import search_database
 
 def main():
     parser = argparse.ArgumentParser(description="Jarvis Life OS - O seu Segundo Cerebro")
@@ -21,6 +22,9 @@ def main():
     notes_parser.add_argument("--list", action="store_true", help="Lista todas as notas")
 
     subparsers.add_parser("inbox", help="Processa e ingere arquivos pendentes da pasta inbox")
+
+    search_parser = subparsers.add_parser("search", help="Busca inteligente no banco de dados")
+    search_parser.add_argument("term", type=str, help="Termo a ser buscado")
 
     args = parser.parse_args()
 
@@ -43,6 +47,8 @@ def main():
             print("⚠️ Uso incorreto. Use: python main.py notes --add <TAG> <CONTEUDO> ou --list")
     elif args.command == "inbox":
         process_inbox()
+    elif args.command == "search":
+        search_database(args.term)
     else:
         print("🧠 [Jarvis Life OS] Bem-vindo ao nucleo do sistema.")
         print("Use 'python main.py -h' para ver os comandos disponiveis.")
