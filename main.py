@@ -8,6 +8,7 @@ from modules.personal.inbox_watcher import process_inbox
 from modules.personal.search_cli import search_database
 from modules.personal.web_fetcher import fetch_and_save_url
 from modules.personal.exporter_cli import export_to_markdown
+from modules.personal.scheduler import start_scheduler
 
 def main():
     parser = argparse.ArgumentParser(description="Jarvis Life OS - O seu Segundo Cerebro")
@@ -33,6 +34,7 @@ def main():
     fetch_parser.add_argument("--tag", type=str, default="web", help="Tag opcional (padrao: web)")
 
     subparsers.add_parser("export", help="Exporta o relatorio completo do sistema para Markdown")
+    subparsers.add_parser("daemon", help="Inicia o agendador autonomo de tarefas em segundo plano")
 
     args = parser.parse_args()
 
@@ -61,6 +63,8 @@ def main():
         fetch_and_save_url(args.url, args.tag)
     elif args.command == "export":
         export_to_markdown()
+    elif args.command == "daemon":
+        start_scheduler()
     else:
         print("🧠 [Jarvis Life OS] Bem-vindo ao nucleo do sistema.")
         print("Use 'python main.py -h' para ver os comandos disponiveis.")
