@@ -1,0 +1,10 @@
+﻿__pycache__/
+*.pyc
+data/jarvis.db
+data/inbox/*
+data/documents/*
+data/audio/*
+data/images/*
+.venv/
+.idea/
+.vscode/
