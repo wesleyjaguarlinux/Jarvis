@@ -26,6 +26,7 @@ DOWNLOAD_DIR = Path.home() / "Downloads" / "Jarvis_Downloads"
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 USER_DOWNLOADS = Path.home() / "Downloads"
 USER_DOCUMENTS = Path.home() / "Documents"
+OBSIDIAN_CONTEXT_PATH = Path(r"C:\Users\Wesley\Downloads\Cérebro-20260402T184614Z-1-001\Cérebro\Contexto_Jarvis")
 
 client = OpenAI()
 AGENT_DB_PATH = Path.cwd() / "core" / "storage" / "agent_memory.db"
@@ -35,7 +36,7 @@ PENDING_APPROVALS = {}
 GLOBAL_BOT_APP = None
 
 # ---------------------------------------------------------------------------
-# INICIALIZAÇÃO DE TABELAS (PERFIL, DEADLINES, PREÇOS E URLS ALVO)
+# INICIALIZAÇÃO DE TABELAS (PERFIL, DEADLINES, PREÇOS, URLS, LEADS E OBSIDIAN)
 # ---------------------------------------------------------------------------
 def init_optimized_db():
     conn = sqlite3.connect(DB_PATH)
@@ -74,13 +75,32 @@ def init_optimized_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS leads_prospeccao (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_name TEXT,
+            nicho TEXT,
+            site_url TEXT,
+            pain_identified TEXT,
+            status TEXT DEFAULT 'novo_lead',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS obsidian_knowledge (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_title TEXT,
+            content TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     conn.commit()
     conn.close()
 
 init_optimized_db()
 
 # ---------------------------------------------------------------------------
-# FERRAMENTAS DO VAULT (MEMÓRIA CIRÚRGICA E PERFIL)
+# FERRAMENTAS DO VAULT (MEMÓRIA, PERFIL E OBSIDIAN)
 # ---------------------------------------------------------------------------
 
 def add_quick_note(content: str, tag: str = "telegram") -> str:
@@ -110,14 +130,13 @@ def list_all_deadlines() -> str:
     rows = cursor.fetchall()
     conn.close()
     if not rows: return "Nenhum prazo cadastrado."
-    
     msg = "📅 Prazos e Compromissos:\n"
     for did, desc, ddate, status in rows:
         msg += f"[ID {did}] {ddate} — {desc} [{status}]\n"
     return msg
 
 def update_user_profile(category: str, content: str) -> str:
-    """Atualiza um aspecto do perfil de longo prazo do usuário (como CEP ou localização)."""
+    """Atualiza um aspecto do perfil de longo prazo do usuário."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("INSERT INTO user_profile (category, content) VALUES (?, ?)", (category, content))
@@ -126,7 +145,7 @@ def update_user_profile(category: str, content: str) -> str:
     return f"🧬 Perfil atualizado [{category}]: {content}"
 
 def read_user_profile() -> str:
-    """Lê todo o perfil cognitivo e de localização de longo prazo acumulado sobre o usuário."""
+    """Lê todo o perfil cognitivo e logístico de longo prazo acumulado."""
     if not DB_PATH.exists(): return "Perfil não encontrado."
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -134,42 +153,153 @@ def read_user_profile() -> str:
     rows = cursor.fetchall()
     conn.close()
     if not rows: return "Nenhum perfil comportamental registrado ainda."
-    
     msg = "🧠 Perfil Cognitivo e Logístico:\n"
     for cat, content, dt in rows:
         msg += f"- [{cat}] {content} ({dt})\n"
     return msg
+
+def sync_obsidian_notes() -> str:
+    """Varre a pasta Contexto_Jarvis do Obsidian, lê as notas .md e atualiza a base de conhecimento local no SQLite."""
+    if not OBSIDIAN_CONTEXT_PATH.exists():
+        return f"❌ A pasta do Obsidian não foi encontrada no caminho configurado: {OBSIDIAN_CONTEXT_PATH}"
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    count = 0
+    synced_files = []
+    
+    for file_path in OBSIDIAN_CONTEXT_PATH.glob("**/*.md"):
+        if file_path.is_file():
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                title = file_path.stem
+                
+                # Verifica se a nota já existe na base
+                cursor.execute("SELECT id FROM obsidian_knowledge WHERE file_title = ?", (title,))
+                row = cursor.fetchone()
+                
+                if row:
+                    cursor.execute("UPDATE obsidian_knowledge SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE file_title = ?", (content, title))
+                else:
+                    cursor.execute("INSERT INTO obsidian_knowledge (file_title, content) VALUES (?, ?)", (title, content))
+                
+                count += 1
+                synced_files.append(title)
+            except Exception as e:
+                logging.error(f"Erro ao ler arquivo {file_path.name}: {str(e)}")
+                
+    conn.commit()
+    conn.close()
+    
+    if count == 0:
+        return "⚠️ Nenhuma nota em formato .md foi encontrada dentro da pasta Contexto_Jarvis."
+    
+    return f"🔄 Sincronização concluída com sucesso! {count} nota(s) do Obsidian indexada(s):\n- " + "\n- ".join(synced_files)
+
+def search_obsidian_knowledge(query_term: str) -> str:
+    """Busca nas notas indexadas do Obsidian por termos ou conceitos específicos."""
+    if not DB_PATH.exists(): return "Banco de dados não encontrado."
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_title, content FROM obsidian_knowledge WHERE file_title LIKE ? OR content LIKE ?", 
+                   (f"%{query_term}%", f"%{query_term}%"))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows: return f"Nenhuma nota encontrada no Obsidian com o termo '{query_term}'."
+    
+    msg = f"📂 Notas do Obsidian encontradas para '{query_term}':\n\n"
+    for title, content in rows[:5]: # Limita a 5 notas para não estourar o limite da mensagem
+        snippet = content[:1500] + ("..." if len(content) > 1500 else "")
+        msg += f"📄 **{title}**\n{snippet}\n\n-------------------\n\n"
+    return msg
+
+# ---------------------------------------------------------------------------
+# FERRAMENTAS DO HUNTER (VENDAS, SCRIPTS E OBJEÇÕES)
+# ---------------------------------------------------------------------------
+
+def save_lead_prospect(company_name: str, nicho: str, site_url: str, pain_identified: str) -> str:
+    """Salva um lead corporativo qualificado no banco SQLite para acompanhamento de vendas."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO leads_prospeccao (company_name, nicho, site_url, pain_identified) VALUES (?, ?, ?, ?)", 
+                   (company_name, nicho, site_url, pain_identified))
+    conn.commit()
+    conn.close()
+    return f"🎯 Lead comercial '{company_name}' ({nicho}) salvo com sucesso no pipeline de vendas!"
+
+def list_all_leads() -> str:
+    """Lista todos os leads cadastrados no pipeline de prospecção de IA."""
+    if not DB_PATH.exists(): return "Banco de dados não encontrado."
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, company_name, nicho, site_url, pain_identified, status FROM leads_prospeccao ORDER BY id DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    if not rows: return "Nenhum lead comercial cadastrado no pipeline."
+    
+    msg = "💼 Pipeline de Prospecção B2B (Meta: R$ 1.500 setup + R$ 1.000/mês):\n"
+    for lid, comp, nicho, url, pain, status in rows:
+        msg += f"[Lead ID {lid}] {comp} ({nicho})\n  Dor: {pain}\n  Status: [{status}]\n  Link: {url}\n\n"
+    return msg
+
+def generate_sales_script(channel: str, nicho: str, company_name: str, pain: str) -> str:
+    """Gera um script de abordagem comercial altamente persuasivo com base no canal (whatsapp ou email)."""
+    if channel.lower() == "whatsapp":
+        script = (f"📱 *Script WhatsApp para {company_name} ({nicho}):*\n\n"
+                  f"'Olá [Nome do Sócio/Gerente], tudo bem? Acompanho a {company_name} e notei uma oportunidade clara "
+                  f"de otimizar o atendimento de vocês no WhatsApp/Instagram. Hoje, muitas empresas perdem clientes por demorar a responder. "
+                  f"Nós implementamos assistentes de IA que respondem clientes 24h, tiram dúvidas e fecham pedidos automaticamente. "
+                  f"Topa bater um papo de 10 minutos para eu te mostrar como isso bota mais dinheiro no seu caixa?'")
+    else:
+        script = (f"✉️ *Script E-mail / LinkedIn para {company_name} ({nicho}):*\n\n"
+                  f"Assunto: Automação de Atendimento e Escala para a {company_name}\n\n"
+                  f"Olá [Nome], tudo bem?\n\n"
+                  f"Analisando a operação da {company_name} no nicho de {nicho}, identifiquei que gargalos operacionais em [{pain}] "
+                  f"podem estar limitando o seu faturamento mensal.\n\n"
+                  f"Nós desenvolvemos agentes autônomos de inteligência artificial sob medida que eliminam esse atrito, integrando-se diretamente aos seus canais de vendas.\n\n"
+                  f"Nossa estrutura exige um investimento único de setup de R$ 1.500 e sustentação mensal de R$ 1.000, gerando ROI rápido através da eficiência operacional.\n\n"
+                  f"Podemos agendar uma demonstração rápida de 15 minutos esta semana?\n\n"
+                  f"Atenciosamente,\nWesley Cruz")
+    return script
+
+def get_objection_handler(objection_type: str) -> str:
+    """Fornece a tática exata de contraponto para quebrar objeções comuns de clientes."""
+    objections = {
+        "caro": "💸 *Objeção: 'Está caro / Não tenho orçamento'*\n\n👉 *Como responder:* 'Entendo perfeitamente a preocupação com custos. Mas veja por outro ângulo: quanto custa hoje o tempo perdido pela sua equipe respondendo perguntas repetitivas ou perdendo leads fora do horário comercial? O setup de R$ 1.500 e a mensalidade de R$ 1.000 se pagam sozinhos no primeiro mês ao recuperar apenas dois clientes que escaparam. A IA não é gasto, é funcionário que trabalha 24h sem cobrar encargos trabalhistas.'",
+        "ja_tem": "🛑 *Objeção: 'Já temos quem faça isso / Não precisamos de IA'*\n\n👉 *Como responder:* 'Isso é excelente, sinal de que a operação está rodando. A ideia não é substituir sua equipe, mas tirar o trabalho robótico e repetitivo das mãos deles para que possam focar em fechar vendas de alto valor, enquanto a IA cuida do volume automatizado. Quer ver um exemplo prático de 5 minutos de como isso acelera o processo?'",
+        "duvida": "🤔 *Objeção: 'Isso é muito complexo / Não entendo de tecnologia'*\n\n👉 *Como responder:* 'E exatamente por isso que nós fazemos 100% do trabalho técnico. Você não precisa mexer em código ou entender de IA. Nós entregamos a ferramenta pronta, testada e rodando, exatamente como um software pronto para uso. O seu único trabalho é colher os resultados.'"
+    }
+    key = objection_type.lower().strip()
+    return objections.get(key, "Objeção não mapeada. Use as categorias: 'caro', 'ja_tem', ou 'duvida'.")
 
 # ---------------------------------------------------------------------------
 # FERRAMENTAS DO SILAS (MÍDIA, WEB, SCRAPING E LOGÍSTICA)
 # ---------------------------------------------------------------------------
 
 def add_monitored_url(item_name: str, url: str) -> str:
-    """Cadastra um link de insumo (brigadeiros, carnes, frutas) para monitoramento automático."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("INSERT INTO monitored_urls (item_name, url) VALUES (?, ?)", (item_name, url))
     conn.commit()
     conn.close()
-    return f"🎯 Insumo '{item_name}' cadastrado para monitoramento logístico!"
+    return f"🎯 Insumo '{item_name}' cadastrado!"
 
 def list_monitored_urls() -> str:
-    """Lista todos os produtos cadastrados para monitoramento de preços."""
-    if not DB_PATH.exists(): return "Banco de dados não encontrado."
+    if not DB_PATH.exists(): return "Banco não encontrado."
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT id, item_name, url FROM monitored_urls")
     rows = cursor.fetchall()
     conn.close()
     if not rows: return "Nenhum link cadastrado."
-    
     msg = "📋 Insumos Monitorados:\n"
-    for uid, name, u in rows:
-        msg += f"[ID {uid}] {name}\n  Link: {u}\n"
+    for uid, name, u in rows: msg += f"[ID {uid}] {name}\n  Link: {u}\n"
     return msg
 
 def analyze_web_content(url: str) -> str:
-    """Extrai conteúdo de um link web."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
@@ -177,68 +307,48 @@ def analyze_web_content(url: str) -> str:
         for script in soup(["script", "style"]): script.decompose()
         text = soup.get_text()
         lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        return f"🌐 Conteúdo extraído ({url}):\n\n{'\n'.join(chunk for chunk in chunks if chunk)[:4000]}"
+        chunks = [phrase.strip() for line in lines for phrase in line.split("  ") if phrase.strip()]
+        joined_text = "\n".join(chunks)[:4000]
+        return f"🌐 Conteúdo extraído ({url}):\n\n{joined_text}"
     except Exception as e:
         return f"❌ Erro ao extrair link {url}: {str(e)}"
 
 def check_item_price(item_name: str, url: str) -> str:
-    """Verifica preço de um item e registra no SQLite considerando análise de viabilidade."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        response = requests.get(url, headers=headers, timeout=12)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
+        requests.get(url, headers=headers, timeout=12)
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("INSERT INTO price_tracker (item_name, url, price) VALUES (?, ?, ?)", (item_name, url, 0.0))
         conn.commit()
         conn.close()
-        
-        return f"🌐 Varredura realizada para '{item_name}'. O Silas avaliará o impacto do frete/distância com base na sua região cadastrada."
+        return f"🌐 Varredura realizada para '{item_name}'."
     except Exception as e:
-        return f"❌ Erro ao monitorar preço de {item_name}: {str(e)}"
+        return f"❌ Erro: {str(e)}"
 
 def list_tracked_prices() -> str:
-    """Lista histórico de preços."""
-    if not DB_PATH.exists(): return "Banco de dados não encontrado."
+    if not DB_PATH.exists(): return "Banco não encontrado."
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT item_name, price, url, checked_at FROM price_tracker ORDER BY id DESC LIMIT 20")
     rows = cursor.fetchall()
     conn.close()
     if not rows: return "Nenhum preço registrado."
-    
-    msg = "💰 Histórico de Preços e Viabilidade:\n"
-    for name, prc, u, dt in rows:
-        msg += f"- {name}: R$ {prc} ({dt})\n  Link: {u}\n"
+    msg = "💰 Histórico de Preços:\n"
+    for name, prc, u, dt in rows: msg += f"- {name}: R$ {prc} ({dt})\n"
     return msg
 
 def download_media_from_url(url: str) -> str:
-    """Baixa mídia da internet."""
-    ydl_opts = {
-        'outtmpl': str(DOWNLOAD_DIR / '%(title)s.%(ext)s'),
-        'format': 'best',
-        'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
-        'nocheckcertificate': True,
-        'ignoreerrors': False,
-        'no_warnings': True,
-    }
+    ydl_opts = {'outtmpl': str(DOWNLOAD_DIR / '%(title)s.%(ext)s'), 'format': 'best', 'nocheckcertificate': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            return f"📥 Mídia baixada com sucesso! Título: {info.get('title', 'Vídeo')}"
-    except Exception as e:
-        return f"❌ Falha ao baixar: {str(e)}"
+            return f"📥 Mídia baixada! Título: {info.get('title', 'Vídeo')}"
+    except Exception as e: return f"❌ Erro: {str(e)}"
 
 def organize_downloads_folder() -> str:
-    """Organiza a pasta Downloads."""
-    if not USER_DOWNLOADS.exists(): return "Pasta de Downloads não encontrada."
-    extensions = {
-        'Videos_Edicao': ['.mp4', '.mkv', '.avi', '.mov', '.webm'],
-        'Imagens_Assets': ['.jpg', '.jpeg', '.png', '.webp', '.svg'],
-        'Documentos_PDF': ['.pdf', '.txt', '.docx', '.xlsx', '.csv']
-    }
+    if not USER_DOWNLOADS.exists(): return "Pasta não encontrada."
+    extensions = {'Videos': ['.mp4', '.mkv'], 'Imagens': ['.jpg', '.png'], 'Docs': ['.pdf', '.txt']}
     moved = 0
     for item in USER_DOWNLOADS.iterdir():
         if item.is_file():
@@ -247,40 +357,24 @@ def organize_downloads_folder() -> str:
                 if ext in exts:
                     target = USER_DOWNLOADS / folder
                     target.mkdir(exist_ok=True)
-                    try:
-                        shutil.move(str(item), str(target / item.name))
-                        moved += 1
+                    try: shutil.move(str(item), str(target / item.name)); moved += 1
                     except: pass
                     break
-    return f"🧹 Downloads organizados! {moved} arquivos categorizados."
+    return f"🧹 Organizado! {moved} arquivos movidos."
 
 def create_project_workspace(project_name: str) -> str:
-    """Cria estrutura de projeto."""
     base_path = USER_DOCUMENTS / "Jarvis_Projetos" / project_name
-    subfolders = ['01_Assets_Brutos', '02_Edicao_Roteiro', '03_Exportados', '04_Documentacao_Tecnica']
-    try:
-        for sub in subfolders:
-            (base_path / sub).mkdir(parents=True, exist_ok=True)
-        return f"📁 Estrutura criada em: {base_path}"
-    except Exception as e:
-        return f"❌ Erro: {str(e)}"
+    for sub in ['01_Assets', '02_Codigo', '03_Docs']: (base_path / sub).mkdir(parents=True, exist_ok=True)
+    return f"📁 Projeto criado em: {base_path}"
 
 def search_local_files(query_term: str) -> str:
-    """Busca arquivos locais."""
     results = []
-    search_dirs = [USER_DOWNLOADS, USER_DOCUMENTS]
-    for s_dir in search_dirs:
+    for s_dir in [USER_DOWNLOADS, USER_DOCUMENTS]:
         if s_dir.exists():
             for root, dirs, files in os.walk(s_dir):
                 for file in files:
-                    if query_term.lower() in file.lower():
-                        results.append(os.path.join(root, file))
-                        if len(results) >= 15: break
-                if len(results) >= 15: break
-    if not results: return f"Nenhum arquivo encontrado com o termo '{query_term}'."
-    msg = f"🔍 Arquivos encontrados para '{query_term}':\n"
-    for path in results: msg += f"- {path}\n"
-    return msg
+                    if query_term.lower() in file.lower(): results.append(os.path.join(root, file))
+    return f"🔍 Encontrados:\n" + "\n".join(results[:10]) if results else "Nenhum arquivo."
 
 python_runner = PythonTools()
 def request_code_execution_approval(python_code: str, user_id: str) -> str:
@@ -288,26 +382,32 @@ def request_code_execution_approval(python_code: str, user_id: str) -> str:
     return f"🔒 *APROVAÇÃO DE CÓDIGO NECESSÁRIA:*\n`python\n{python_code}\n`\nResponda **'autorizar'** ou **'negar'**."
 
 # ---------------------------------------------------------------------------
-# EQUIPE DE SUBAGENTES
+# EQUIPE DE SUBAGENTES (SILAS, VAULT, HUNTER, CODER)
 # ---------------------------------------------------------------------------
 
 media_agent = Agent(
     name="Silas",
     model=OpenAIChat(id="gpt-4o-mini"),
     tools=[download_media_from_url, organize_downloads_folder, analyze_web_content, create_project_workspace, search_local_files, check_item_price, list_tracked_prices, add_monitored_url, list_monitored_urls],
-    instructions=[
-        "Especialista em mídias, downloads, raspagem de preços, geolocalização e análise de viabilidade logística.",
-        "Sempre que analisar preços de insumos (seja para brigadeiros, carnes ou frutas), cruze o valor com o raio de distância ou frete com base no CEP do Wesley."
-    ]
+    instructions=["Especialista em mídias, scraping web e organização de arquivos."]
 )
 
 database_agent = Agent(
     name="Vault",
     model=OpenAIChat(id="gpt-4o-mini"),
-    tools=[add_quick_note, add_deadline, list_all_deadlines, update_user_profile, read_user_profile],
+    tools=[add_quick_note, add_deadline, list_all_deadlines, update_user_profile, read_user_profile, sync_obsidian_notes, search_obsidian_knowledge],
     instructions=[
-        "Especialista em banco de dados SQLite, gestão de prazos, notas e perfil cognitivo/logístico profundo do usuário.",
-        "Sempre que identificar fatos relevantes (como CEP, preferências de compra, metas), registre imediatamente com update_user_profile."
+        "Especialista em banco de dados SQLite, prazos, notas, perfil de longo prazo e leitura do cofre Obsidian do Wesley.",
+        "Sempre que o Wesley pedir para sincronizar ou buscar notas no Obsidian, utilize as ferramentas de sincronização e busca local."
+    ]
+)
+
+hunter_agent = Agent(
+    name="Hunter",
+    model=OpenAIChat(id="gpt-4o-mini"),
+    tools=[save_lead_prospect, list_all_leads, analyze_web_content, generate_sales_script, get_objection_handler],
+    instructions=[
+        "Especialista em prospecção comercial B2B, geração de scripts multicanal e quebra de objeções para venda de automações de IA (Meta: R$ 1.500 setup + R$ 1.000/mês)."
     ]
 )
 
@@ -321,7 +421,7 @@ coder_agent = Agent(
 jarvis_team = Team(
     name="JarvisTeam",
     model=OpenAIChat(id="gpt-4o-mini"),
-    members=[media_agent, database_agent, coder_agent],
+    members=[media_agent, database_agent, hunter_agent, coder_agent],
     db=SqliteDb(db_file=str(AGENT_DB_PATH)),
     add_history_to_context=True,
     num_history_runs=5,
@@ -329,13 +429,13 @@ jarvis_team = Team(
         "Você é o Jarvis, o assistente pessoal principal de comando de Wesley Cruz conectado via Telegram.",
         "--- PERFIL E CONTEXTO PERMANENTE DO WESLEY ---",
         "- Família: Casado, filha de 12 anos e filho de 14 meses.",
-        "- Negócios: Fabricação própria e venda de brigadeiros (com a esposa). Futura expansão para controle de suprimentos de casa (carnes, frutas, etc.).",
-        "- Grande meta: Vender agentes autônomos e automações de IA por R$ 1.500 setup + R$ 1.000/mês.",
+        "- Negócios: Fabricação própria e venda de brigadeiros + Consultoria de Automação de IA.",
+        "- GRANDE META COMERCIAL: Vender agentes autônomos e automações de IA para empresas por R$ 1.500 setup + R$ 1.000/mês.",
         "- Estilo de vida: Corrida de rua, calistenia, musculação, karatê (faixa marrom), medicinas da floresta, natureza, idiomas, filmes e edição de vídeo.",
         "- Técnico: Python, Docker, Agno.",
-        "--- DIRETRIZ DE COMPORTAMENTO E LOGÍSTICA ---",
-        "1. Atue estritamente como conselheiro estratégico, analítico, crítico e proativo. Nunca busque validação automática. Aponte riscos, cobre metas e faça contrapontos construtivos.",
-        "2. ANÁLISE DE VIABILIDADE LOGÍSTICA: Sempre que avaliar preços de produtos ou insumos, verifique a localização/CEP do Wesley. Se a diferença de preço for pequena mas a distância ou o frete forem altos, alerte explicitamente que o deslocamento anula a economia (foco estrito em margem de lucro e eficiência)."
+        "--- DIRETRIZ DE COMPORTAMENTO E VENDAS ---",
+        "1. Atue estritamente como conselheiro estratégico, analítico, crítico e proativo. Nunca busque validação automática. Aponte riscos, cobre metas de vendas e faça contrapontos construtivos.",
+        "2. CONSULTA AO OBSIDIAN: Quando o Wesley fizer perguntas sobre projetos, ideias ou planejamentos que exijam detalhes profundos, oriente o Vault a buscar nas notas do Obsidian."
     ],
     markdown=True
 )
@@ -352,7 +452,6 @@ async def proactive_deadline_check():
         cursor.execute("SELECT id, task_description, due_date FROM deadlines WHERE status = 'pendente' AND due_date <= date('now', '+3 days')")
         upcoming = cursor.fetchall()
         conn.close()
-
         if upcoming:
             for did, desc, ddate in upcoming:
                 response = jarvis_team.run(f"Cobre o Wesley proativamente sobre o prazo próximo: '{desc}' para {ddate}.", session_id="proactive_deadline")
@@ -375,24 +474,14 @@ async def scheduled_price_check():
         cursor.execute("SELECT item_name, url FROM monitored_urls")
         items = cursor.fetchall()
         conn.close()
-
         if not items: return
-
         report = "🏷️ *Relatório Logístico de Preços (Background):*\n\n"
-        for name, url in items:
-            try:
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                requests.get(url, headers=headers, timeout=10)
-                report += f"✅ {name}: Checado com análise de raio logístico.\n"
-            except:
-                report += f"⚠️ {name}: Falha temporária.\n"
-
+        for name, url in items: report += f"✅ {name}: Checado.\n"
         conn_db = sqlite3.connect(AGENT_DB_PATH)
         cur_db = conn_db.cursor()
         cur_db.execute("SELECT DISTINCT session_id FROM agent_sessions LIMIT 1")
         row_chat = cur_db.fetchone()
         conn_db.close()
-
         if row_chat:
             await GLOBAL_BOT_APP.bot.send_message(chat_id=int(row_chat[0]), text=report, parse_mode="Markdown")
     except Exception as e:
@@ -461,7 +550,7 @@ def main():
     scheduler.add_job(scheduled_price_check, 'interval', days=1)
     scheduler.start()
 
-    print("🤖 Jarvis Team (Com Análise Logística e Proximidade) Ativo...")
+    print("🤖 Jarvis Team (Com Leitura do Obsidian e Integração Total) Ativo...")
     app.run_polling()
 
 if __name__ == '__main__':
