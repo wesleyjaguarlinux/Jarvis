@@ -13,6 +13,8 @@ from modules.personal.goals_cli import add_goal, list_today_goals, complete_goal
 from modules.personal.agent_runner import run_local_agent
 from modules.personal.agent_history import list_agent_history
 from modules.personal.system_status import check_system_status
+from modules.personal.jarvis_help import show_interactive_guide
+from modules.personal.release_check import audit_system_release
 
 def main():
     parser = argparse.ArgumentParser(description="Jarvis Life OS - O seu Segundo Cerebro")
@@ -20,6 +22,8 @@ def main():
 
     subparsers.add_parser("report", help="Gera o relatorio consolidado de produtividade")
     subparsers.add_parser("status", help="Exibe o painel de diagnostico e saude do sistema")
+    subparsers.add_parser("guide", help="Exibe o guia interativo de comandos do Jarvis")
+    subparsers.add_parser("release", help="Executa a auditoria final de 100% do projeto")
 
     habits_parser = subparsers.add_parser("habits", help="Gerenciamento de habitos e metas")
     habits_parser.add_argument("--list", action="store_true", help="Lista habitos pendentes")
@@ -54,6 +58,10 @@ def main():
         generate_report()
     elif args.command == "status":
         check_system_status()
+    elif args.command == "guide":
+        show_interactive_guide()
+    elif args.command == "release":
+        audit_system_release()
     elif args.command == "habits":
         if args.list:
             list_pending_habits()
@@ -94,7 +102,7 @@ def main():
         list_agent_history()
     else:
         print("🧠 [Jarvis Life OS] Bem-vindo ao nucleo do sistema.")
-        print("Use 'python main.py -h' para ver os comandos disponiveis.")
+        print("Use 'python main.py guide' para ver os comandos disponiveis.")
 
 if __name__ == "__main__":
     main()

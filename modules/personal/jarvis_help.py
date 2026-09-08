@@ -1,0 +1,32 @@
+﻿# -*- coding: utf-8 -*-
+
+def show_interactive_guide():
+    print("\n🧠 ===============================================")
+    print("          JARVIS LIFE OS - GUIA DE COMANDOS       ")
+    print("=================================================")
+    print("🔹 **Diagnóstico e Relatórios**")
+    print("  - python main.py status           -> Exibe a saúde geral do sistema")
+    print("  - python main.py report           -> Gera o relatório consolidado")
+    print("  - python main.py export           -> Exporta dados em Markdown")
+    print()
+    print("🔹 **Automação e Agentes**")
+    print("  - python main.py agent            -> Executa a varredura do agente local")
+    print("  - python main.py agent-history    -> Lista o histórico de ações do agente")
+    print("  - python main.py daemon           -> Inicia o agendador em segundo plano")
+    print("  - python main.py inbox            -> Processa arquivos pendentes na inbox")
+    print()
+    print("🔹 **Produtividade (Notas, Hábitos e Metas)**")
+    print("  - python main.py goals --list     -> Lista as metas do dia")
+    print("  - python main.py goals --add '...'-> Adiciona uma nova meta")
+    print("  - python main.py goals --done ID  -> Marca meta como concluída")
+    print("  - python main.py habits --list    -> Lista hábitos pendentes")
+    print("  - python main.py notes --list     -> Lista notas rápidas")
+    print("  - python main.py notes --add T C  -> Adiciona nota rápida (Tag/Conteúdo)")
+    print()
+    print("🔹 **Conhecimento**")
+    print("  - python main.py search 'termo'   -> Busca inteligente no banco de dados")
+    print("  - python main.py fetch URL --tag  -> Captura conteúdo da web para notas")
+    print("=================================================\n")
+
+if __name__ == "__main__":
+    show_interactive_guide()
