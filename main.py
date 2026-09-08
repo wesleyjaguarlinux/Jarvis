@@ -12,12 +12,14 @@ from modules.personal.scheduler import start_scheduler
 from modules.personal.goals_cli import add_goal, list_today_goals, complete_goal
 from modules.personal.agent_runner import run_local_agent
 from modules.personal.agent_history import list_agent_history
+from modules.personal.system_status import check_system_status
 
 def main():
     parser = argparse.ArgumentParser(description="Jarvis Life OS - O seu Segundo Cerebro")
     subparsers = parser.add_subparsers(dest="command", help="Comandos disponiveis")
 
     subparsers.add_parser("report", help="Gera o relatorio consolidado de produtividade")
+    subparsers.add_parser("status", help="Exibe o painel de diagnostico e saude do sistema")
 
     habits_parser = subparsers.add_parser("habits", help="Gerenciamento de habitos e metas")
     habits_parser.add_argument("--list", action="store_true", help="Lista habitos pendentes")
@@ -50,6 +52,8 @@ def main():
 
     if args.command == "report":
         generate_report()
+    elif args.command == "status":
+        check_system_status()
     elif args.command == "habits":
         if args.list:
             list_pending_habits()
