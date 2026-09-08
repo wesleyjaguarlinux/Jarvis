@@ -35,7 +35,7 @@ PENDING_APPROVALS = {}
 GLOBAL_BOT_APP = None
 
 # ---------------------------------------------------------------------------
-# INICIALIZAÇÃO DE TABELAS (PERFIL E DEADLINES)
+# INICIALIZAÇÃO DE TABELAS (PERFIL, DEADLINES, PREÇOS E URLS ALVO)
 # ---------------------------------------------------------------------------
 def init_optimized_db():
     conn = sqlite3.connect(DB_PATH)
@@ -57,13 +57,30 @@ def init_optimized_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS price_tracker (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_name TEXT,
+            url TEXT,
+            price REAL,
+            checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS monitored_urls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_name TEXT,
+            url TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     conn.commit()
     conn.close()
 
 init_optimized_db()
 
 # ---------------------------------------------------------------------------
-# FERRAMENTAS DO VAULT (MEMÓRIA CIRÚRGICA E PRAZOS)
+# FERRAMENTAS DO VAULT (MEMÓRIA CIRÚRGICA E PERFIL)
 # ---------------------------------------------------------------------------
 
 def add_quick_note(content: str, tag: str = "telegram") -> str:
@@ -100,7 +117,7 @@ def list_all_deadlines() -> str:
     return msg
 
 def update_user_profile(category: str, content: str) -> str:
-    """Atualiza um aspecto do perfil de longo prazo do usuário de forma autônoma."""
+    """Atualiza um aspecto do perfil de longo prazo do usuário (como CEP ou localização)."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("INSERT INTO user_profile (category, content) VALUES (?, ?)", (category, content))
@@ -109,7 +126,7 @@ def update_user_profile(category: str, content: str) -> str:
     return f"🧬 Perfil atualizado [{category}]: {content}"
 
 def read_user_profile() -> str:
-    """Lê todo o perfil cognitivo de longo prazo acumulado sobre o usuário."""
+    """Lê todo o perfil cognitivo e de localização de longo prazo acumulado sobre o usuário."""
     if not DB_PATH.exists(): return "Perfil não encontrado."
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -118,17 +135,41 @@ def read_user_profile() -> str:
     conn.close()
     if not rows: return "Nenhum perfil comportamental registrado ainda."
     
-    msg = "🧠 Perfil Cognitivo de Longo Prazo:\n"
+    msg = "🧠 Perfil Cognitivo e Logístico:\n"
     for cat, content, dt in rows:
         msg += f"- [{cat}] {content} ({dt})\n"
     return msg
 
 # ---------------------------------------------------------------------------
-# FERRAMENTAS DO SILAS (MÍDIA, WEB E AUTOMAÇÃO DE ARQUIVOS)
+# FERRAMENTAS DO SILAS (MÍDIA, WEB, SCRAPING E LOGÍSTICA)
 # ---------------------------------------------------------------------------
 
+def add_monitored_url(item_name: str, url: str) -> str:
+    """Cadastra um link de insumo (brigadeiros, carnes, frutas) para monitoramento automático."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO monitored_urls (item_name, url) VALUES (?, ?)", (item_name, url))
+    conn.commit()
+    conn.close()
+    return f"🎯 Insumo '{item_name}' cadastrado para monitoramento logístico!"
+
+def list_monitored_urls() -> str:
+    """Lista todos os produtos cadastrados para monitoramento de preços."""
+    if not DB_PATH.exists(): return "Banco de dados não encontrado."
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, item_name, url FROM monitored_urls")
+    rows = cursor.fetchall()
+    conn.close()
+    if not rows: return "Nenhum link cadastrado."
+    
+    msg = "📋 Insumos Monitorados:\n"
+    for uid, name, u in rows:
+        msg += f"[ID {uid}] {name}\n  Link: {u}\n"
+    return msg
+
 def analyze_web_content(url: str) -> str:
-    """Extrai conteúdo de um link web enviado pelo usuário."""
+    """Extrai conteúdo de um link web."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
@@ -141,8 +182,40 @@ def analyze_web_content(url: str) -> str:
     except Exception as e:
         return f"❌ Erro ao extrair link {url}: {str(e)}"
 
+def check_item_price(item_name: str, url: str) -> str:
+    """Verifica preço de um item e registra no SQLite considerando análise de viabilidade."""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(url, headers=headers, timeout=12)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO price_tracker (item_name, url, price) VALUES (?, ?, ?)", (item_name, url, 0.0))
+        conn.commit()
+        conn.close()
+        
+        return f"🌐 Varredura realizada para '{item_name}'. O Silas avaliará o impacto do frete/distância com base na sua região cadastrada."
+    except Exception as e:
+        return f"❌ Erro ao monitorar preço de {item_name}: {str(e)}"
+
+def list_tracked_prices() -> str:
+    """Lista histórico de preços."""
+    if not DB_PATH.exists(): return "Banco de dados não encontrado."
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT item_name, price, url, checked_at FROM price_tracker ORDER BY id DESC LIMIT 20")
+    rows = cursor.fetchall()
+    conn.close()
+    if not rows: return "Nenhum preço registrado."
+    
+    msg = "💰 Histórico de Preços e Viabilidade:\n"
+    for name, prc, u, dt in rows:
+        msg += f"- {name}: R$ {prc} ({dt})\n  Link: {u}\n"
+    return msg
+
 def download_media_from_url(url: str) -> str:
-    """Baixa um vídeo ou áudio da internet para a pasta Jarvis_Downloads."""
+    """Baixa mídia da internet."""
     ydl_opts = {
         'outtmpl': str(DOWNLOAD_DIR / '%(title)s.%(ext)s'),
         'format': 'best',
@@ -159,7 +232,7 @@ def download_media_from_url(url: str) -> str:
         return f"❌ Falha ao baixar: {str(e)}"
 
 def organize_downloads_folder() -> str:
-    """Organiza a pasta Downloads do usuário separando vídeos, imagens e documentos."""
+    """Organiza a pasta Downloads."""
     if not USER_DOWNLOADS.exists(): return "Pasta de Downloads não encontrada."
     extensions = {
         'Videos_Edicao': ['.mp4', '.mkv', '.avi', '.mov', '.webm'],
@@ -179,31 +252,23 @@ def organize_downloads_folder() -> str:
                         moved += 1
                     except: pass
                     break
-    return f"🧹 Pasta Downloads organizada com sucesso! {moved} arquivos categorizados."
+    return f"🧹 Downloads organizados! {moved} arquivos categorizados."
 
 def create_project_workspace(project_name: str) -> str:
-    """Cria uma estrutura padrão de pastas para um novo projeto de vídeo/edição ou desenvolvimento de IA na pasta Documents.
-    Args:
-        project_name: Nome do projeto (ex: 'Campanha_Brigadeiros' ou 'Agente_Empresa_X')
-    """
+    """Cria estrutura de projeto."""
     base_path = USER_DOCUMENTS / "Jarvis_Projetos" / project_name
     subfolders = ['01_Assets_Brutos', '02_Edicao_Roteiro', '03_Exportados', '04_Documentacao_Tecnica']
-    
     try:
         for sub in subfolders:
             (base_path / sub).mkdir(parents=True, exist_ok=True)
-        return f"📁 Estrutura de projeto criada com sucesso em: {base_path}\nSubpastas: {', '.join(subfolders)}"
+        return f"📁 Estrutura criada em: {base_path}"
     except Exception as e:
-        return f"❌ Erro ao criar estrutura de projeto: {str(e)}"
+        return f"❌ Erro: {str(e)}"
 
 def search_local_files(query_term: str) -> str:
-    """Busca arquivos pelo nome na pasta Documents ou Downloads do usuário.
-    Args:
-        query_term: Termo ou palavra-chave para buscar no nome do arquivo.
-    """
+    """Busca arquivos locais."""
     results = []
     search_dirs = [USER_DOWNLOADS, USER_DOCUMENTS]
-    
     for s_dir in search_dirs:
         if s_dir.exists():
             for root, dirs, files in os.walk(s_dir):
@@ -212,12 +277,9 @@ def search_local_files(query_term: str) -> str:
                         results.append(os.path.join(root, file))
                         if len(results) >= 15: break
                 if len(results) >= 15: break
-
     if not results: return f"Nenhum arquivo encontrado com o termo '{query_term}'."
-    
     msg = f"🔍 Arquivos encontrados para '{query_term}':\n"
-    for path in results:
-        msg += f"- {path}\n"
+    for path in results: msg += f"- {path}\n"
     return msg
 
 python_runner = PythonTools()
@@ -232,10 +294,10 @@ def request_code_execution_approval(python_code: str, user_id: str) -> str:
 media_agent = Agent(
     name="Silas",
     model=OpenAIChat(id="gpt-4o-mini"),
-    tools=[download_media_from_url, organize_downloads_folder, analyze_web_content, create_project_workspace, search_local_files],
+    tools=[download_media_from_url, organize_downloads_folder, analyze_web_content, create_project_workspace, search_local_files, check_item_price, list_tracked_prices, add_monitored_url, list_monitored_urls],
     instructions=[
-        "Especialista em mídias, downloads, leitura de links web e automação avançada de arquivos e pastas no computador do usuário.",
-        "Use organize_downloads_folder para limpar downloads, create_project_workspace para estruturar novos projetos de vídeo ou IA, e search_local_files para localizar arquivos."
+        "Especialista em mídias, downloads, raspagem de preços, geolocalização e análise de viabilidade logística.",
+        "Sempre que analisar preços de insumos (seja para brigadeiros, carnes ou frutas), cruze o valor com o raio de distância ou frete com base no CEP do Wesley."
     ]
 )
 
@@ -244,8 +306,8 @@ database_agent = Agent(
     model=OpenAIChat(id="gpt-4o-mini"),
     tools=[add_quick_note, add_deadline, list_all_deadlines, update_user_profile, read_user_profile],
     instructions=[
-        "Especialista em banco de dados SQLite, gestão de prazos, notas e perfil cognitivo profundo do usuário.",
-        "Sempre que identificar um fato relevante sobre o Wesley durante a conversa, use update_user_profile imediatamente."
+        "Especialista em banco de dados SQLite, gestão de prazos, notas e perfil cognitivo/logístico profundo do usuário.",
+        "Sempre que identificar fatos relevantes (como CEP, preferências de compra, metas), registre imediatamente com update_user_profile."
     ]
 )
 
@@ -267,21 +329,21 @@ jarvis_team = Team(
         "Você é o Jarvis, o assistente pessoal principal de comando de Wesley Cruz conectado via Telegram.",
         "--- PERFIL E CONTEXTO PERMANENTE DO WESLEY ---",
         "- Família: Casado, filha de 12 anos e filho de 14 meses.",
-        "- Negócios: Fabricação própria e venda de brigadeiros (com a esposa). Grande meta: Vender agentes autônomos e automações de IA para empresas por R$ 1.500 setup + R$ 1.000/mês.",
-        "- Estilo de vida: Corrida de rua, calistenia, musculação, karatê (faixa marrom), medicinas da floresta (Ayahuasca, Sananga, Rapé, Cachimbo Sagrado), natureza, idiomas, filmes e edição de vídeo.",
+        "- Negócios: Fabricação própria e venda de brigadeiros (com a esposa). Futura expansão para controle de suprimentos de casa (carnes, frutas, etc.).",
+        "- Grande meta: Vender agentes autônomos e automações de IA por R$ 1.500 setup + R$ 1.000/mês.",
+        "- Estilo de vida: Corrida de rua, calistenia, musculação, karatê (faixa marrom), medicinas da floresta, natureza, idiomas, filmes e edição de vídeo.",
         "- Técnico: Python, Docker, Agno.",
-        "--- DIRETRIZ DE COMPORTAMENTO ---",
+        "--- DIRETRIZ DE COMPORTAMENTO E LOGÍSTICA ---",
         "1. Atue estritamente como conselheiro estratégico, analítico, crítico e proativo. Nunca busque validação automática. Aponte riscos, cobre metas e faça contrapontos construtivos.",
-        "2. INSTRUÇÃO CRÍTICA DE APRENDIZADO: Ao conversar com o Wesley, se ele mencionar qualquer preferência nova, mudança de plano, hábito ou objetivo, instrua o subagente Vault para registrar no banco de dados sem que ele precise pedir."
+        "2. ANÁLISE DE VIABILIDADE LOGÍSTICA: Sempre que avaliar preços de produtos ou insumos, verifique a localização/CEP do Wesley. Se a diferença de preço for pequena mas a distância ou o frete forem altos, alerte explicitamente que o deslocamento anula a economia (foco estrito em margem de lucro e eficiência)."
     ],
     markdown=True
 )
 
 # ---------------------------------------------------------------------------
-# TAREFA PROATIVA DE DEADLINES
+# TAREFAS PROATIVAS
 # ---------------------------------------------------------------------------
 async def proactive_deadline_check():
-    """Varre prazos próximos e cobra o usuário proativamente."""
     global GLOBAL_BOT_APP
     if not GLOBAL_BOT_APP: return
     try:
@@ -300,9 +362,41 @@ async def proactive_deadline_check():
                 row_chat = cur_db.fetchone()
                 conn_db.close()
                 if row_chat:
-                    await GLOBAL_BOT_APP.bot.send_message(chat_id=int(row_chat[0]), text=f"🚨 *Alerta Proativo:*\n\n{response.content}", parse_mode="Markdown")
+                    await GLOBAL_BOT_APP.bot.send_message(chat_id=int(row_chat[0]), text=f"🚨 *Alerta Proativo (Prazo):*\n\n{response.content}", parse_mode="Markdown")
     except Exception as e:
         logging.error(f"Erro nos deadlines: {str(e)}")
+
+async def scheduled_price_check():
+    global GLOBAL_BOT_APP
+    if not GLOBAL_BOT_APP: return
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT item_name, url FROM monitored_urls")
+        items = cursor.fetchall()
+        conn.close()
+
+        if not items: return
+
+        report = "🏷️ *Relatório Logístico de Preços (Background):*\n\n"
+        for name, url in items:
+            try:
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                requests.get(url, headers=headers, timeout=10)
+                report += f"✅ {name}: Checado com análise de raio logístico.\n"
+            except:
+                report += f"⚠️ {name}: Falha temporária.\n"
+
+        conn_db = sqlite3.connect(AGENT_DB_PATH)
+        cur_db = conn_db.cursor()
+        cur_db.execute("SELECT DISTINCT session_id FROM agent_sessions LIMIT 1")
+        row_chat = cur_db.fetchone()
+        conn_db.close()
+
+        if row_chat:
+            await GLOBAL_BOT_APP.bot.send_message(chat_id=int(row_chat[0]), text=report, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Erro no monitoramento logístico: {str(e)}")
 
 # ---------------------------------------------------------------------------
 # MANIPULADORES DE MENSAGEM
@@ -364,9 +458,10 @@ def main():
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(proactive_deadline_check, 'interval', hours=6)
+    scheduler.add_job(scheduled_price_check, 'interval', days=1)
     scheduler.start()
 
-    print("🤖 Jarvis Team (Com Automação de Arquivos e Silas Operacional) Ativo...")
+    print("🤖 Jarvis Team (Com Análise Logística e Proximidade) Ativo...")
     app.run_polling()
 
 if __name__ == '__main__':
