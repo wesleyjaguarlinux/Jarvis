@@ -98,10 +98,10 @@ def init_optimized_db():
 init_optimized_db()
 
 # ---------------------------------------------------------------------------
-# MOTOR DE BLOCOS DE TEMPO E COMPILADOR DIÁRIO (BACKEND)
+# MOTOR DE REGISTRO PÓS-BLOCO E COMPILAÇÃO (BACKEND)
 # ---------------------------------------------------------------------------
 
-def backend_add_time_block(start_time: str, end_time: str, activity_category: str, description: str, interruptions: str = "Nenhuma") -> str:
+def backend_add_time_block_flex(start_time: str, end_time: str, activity_category: str, description: str, interruptions: str = "Nenhuma") -> str:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     today_str = date.today().strftime("%Y-%m-%d")
@@ -111,7 +111,7 @@ def backend_add_time_block(start_time: str, end_time: str, activity_category: st
     """, (today_str, start_time, end_time, activity_category, description, interruptions))
     conn.commit()
     conn.close()
-    return f"⏱️ Bloco registrado [{start_time} - {end_time}] ({activity_category.upper()}): {description} | Distrações: {interruptions}"
+    return f"⏱️ Bloco Registrado com Sucesso [{start_time} - {end_time}] ({activity_category.upper()}):\n- O que foi feito: {description}\n- Interrupções/Intervalos: {interruptions}"
 
 def backend_compile_daily_summary() -> str:
     if not DB_PATH.exists(): return "Banco de dados não encontrado."
@@ -128,29 +128,21 @@ def backend_compile_daily_summary() -> str:
     conn.close()
     
     if not rows:
-        return f"⚠️ Nenhum bloco de tempo registrado para hoje ({today_str}). Envie seus blocos ao longo do dia para compilar o resumo."
+        return f"⚠️ Nenhum bloco de tempo registrado para hoje ({today_str})."
         
     summary = f"# 📝 REGISTRO DIÁRIO DE EXECUÇÃO — [{today_str}]\n\n"
     summary += "## ⏱️ 1. Linha do Tempo e Blocos de Produção\n"
     for st, et, cat, desc, intr in rows:
-        summary += f"- **[{st} - {et}] ({cat.upper()}):** {desc} | *Gargalo/Interrupção:* {intr}\n"
+        summary += f"- **[{st} - {et}] ({cat.upper()}):** {desc} | *Gargalo/Intervalo:* {intr}\n"
         
-    summary += "\n## 🎯 2. Análise de Foco e Próximos Passos\n"
-    summary += "- **Balanço:** Blocos computados e estruturados com sucesso para exportação ao Obsidian.\n"
-    summary += "- **Ação Corretiva:** Manter rastreio contínuo e eliminar distrações mapeadas nos intervalos.\n"
+    summary += "\n## 🎯 2. Análise de Foco e Padrões\n"
+    summary += "- **Status:** Dados consolidados com sucesso para cópia no Obsidian.\n"
     
     return summary
 
 def backend_add_domestic_task(task_name: str, category: str, due_date: str, due_time: str) -> str:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, task_name FROM domestic_tasks WHERE due_date = ? AND due_time = ? AND status = 'pendente'", (due_date, due_time))
-    conflict = cursor.fetchone()
-    
-    if conflict:
-        conn.close()
-        return f"🚨 CONFLITO DE AGENDA DETECTADO!\n\nVocê já tem o compromisso '[ID {conflict[0]}] {conflict[1]}' agendado para o dia {due_date} às {due_time}."
-
     cursor.execute("INSERT INTO domestic_tasks (task_name, category, due_date, due_time) VALUES (?, ?, ?, ?)", 
                    (task_name, category, due_date, due_time))
     conn.commit()
@@ -158,10 +150,10 @@ def backend_add_domestic_task(task_name: str, category: str, due_date: str, due_
     return f"🏠 Compromisso registrado [{category}]: '{task_name}' para {due_date} às {due_time}."
 
 def backend_list_domestic_tasks() -> str:
-    if not DB_PATH.exists(): return "Banco de dados não encontrado."
+    if not DB_PATH.exists(): return "Banco não encontrado."
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, task_name, category, due_date, due_time, status FROM domestic_tasks ORDER BY due_date ASC, due_time ASC")
+    cursor.execute("SELECT id, task_name, category, due_date, due_time, status FROM domestic_tasks ORDER BY due_date ASC")
     rows = cursor.fetchall()
     conn.close()
     if not rows: return "Nenhuma tarefa cadastrada."
@@ -175,9 +167,9 @@ def backend_list_domestic_tasks() -> str:
 # FERRAMENTAS DO VAULT
 # ---------------------------------------------------------------------------
 
-def add_time_block(start_time: str, end_time: str, activity_category: str, description: str, interruptions: str = "Nenhuma") -> str:
-    """Registra um bloco de tempo estruturado com horários, categoria, o que foi feito e interrupções."""
-    return backend_add_time_block(start_time, end_time, activity_category, description, interruptions)
+def add_time_block_flex(start_time: str, end_time: str, activity_category: str, description: str, interruptions: str = "Nenhuma") -> str:
+    """Registra um bloco de tempo estruturado logo após a tarefa (ex: 'comecei às 14h, acabei às 15h30, fiz X, interrupções Y')."""
+    return backend_add_time_block_flex(start_time, end_time, activity_category, description, interruptions)
 
 def compile_daily_summary() -> str:
     """Compila todos os blocos do dia em um relatório pronto para o Obsidian."""
@@ -220,36 +212,18 @@ def search_obsidian_knowledge(query_term: str = "") -> str:
 # ---------------------------------------------------------------------------
 # SUBAGENTES E EQUIPE
 # ---------------------------------------------------------------------------
-media_agent = Agent(
-    name="Silas",
-    model=OpenAIChat(id="gpt-4o-mini"),
-    tools=[lambda: "Ok"],
-    instructions=["Mídias."]
-)
-
+media_agent = Agent(name="Silas", model=OpenAIChat(id="gpt-4o-mini"), tools=[lambda: "Ok"], instructions=["Mídias."])
 database_agent = Agent(
     name="Vault",
     model=OpenAIChat(id="gpt-4o-mini"),
-    tools=[add_time_block, compile_daily_summary, add_domestic_task, list_domestic_tasks, sync_obsidian_notes, search_obsidian_knowledge],
+    tools=[add_time_block_flex, compile_daily_summary, add_domestic_task, list_domestic_tasks, sync_obsidian_notes, search_obsidian_knowledge],
     instructions=[
-        "Especialista em SQLite, blocos de tempo, compilação diária e cofre do Obsidian.",
-        "DATA ATUAL: 2026-09-10. Utilize add_time_block() para registrar blocos e compile_daily_summary() para gerar o resumo do dia."
+        "Especialista em SQLite, blocos de tempo flexíveis, compilação diária e cofre do Obsidian.",
+        "DATA ATUAL: 2026-09-10. Utilize add_time_block_flex() sempre que o Wesley relatar uma tarefa concluída informando horários, o que fez e interrupções. Utilize compile_daily_summary() para gerar o consolidado."
     ]
 )
-
-hunter_agent = Agent(
-    name="Hunter",
-    model=OpenAIChat(id="gpt-4o-mini"),
-    tools=[lambda: "Ok"],
-    instructions=["Prospecção."]
-)
-
-coder_agent = Agent(
-    name="Coder",
-    model=OpenAIChat(id="gpt-4o-mini"),
-    tools=[lambda: "Ok"],
-    instructions=["Técnico."]
-)
+hunter_agent = Agent(name="Hunter", model=OpenAIChat(id="gpt-4o-mini"), tools=[lambda: "Ok"], instructions=["Prospecção."])
+coder_agent = Agent(name="Coder", model=OpenAIChat(id="gpt-4o-mini"), tools=[lambda: "Ok"], instructions=["Técnico."])
 
 jarvis_team = Team(
     name="JarvisTeam",
@@ -283,7 +257,7 @@ async def trigger_daily_compilation_reminder():
                 parse_mode="Markdown"
             )
     except Exception as e:
-        logging.error(f"Erro no lembrete de compilação: {str(e)}")
+        logging.error(f"Erro no lembrete: {str(e)}")
 
 async def process_user_input(update: Update, text_content: str):
     user_id = str(update.effective_user.id)
@@ -333,11 +307,10 @@ def main():
     app.add_handler(MessageHandler(filters.COMMAND, handle_message))
 
     scheduler = BackgroundScheduler()
-    # Dispara o resumo de fechamento às 21:00h
     scheduler.add_job(trigger_daily_compilation_reminder, 'cron', hour=21, minute=0)
     scheduler.start()
 
-    print("🤖 Jarvis Team (Blocos de Tempo e Compilador Ativo) Pronto...")
+    print("🤖 Jarvis Team (Blocos Flexíveis Ativo) Pronto...")
     app.run_polling()
 
 if __name__ == '__main__':
